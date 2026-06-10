@@ -117,34 +117,34 @@ NAPI / C++ Native dynamic loading
 ## System Architecture
 
 ```text
-┌─────────────────────────────────────────────────────┐
-│                  ArkTS Application Layer             │
-│  ┌────────────┐ ┌────────────┐ ┌──────────────────┐ │
-│  │ Status View │ │ Config Mgmt │ │ Control / Diag   │ │
-│  └────────────┘ └────────────┘ └──────────────────┘ │
-├─────────────────────────────────────────────────────┤
-│              Network Extension Layer                 │
-│  • Creates a virtual network interface                │
-│  • Manages extension lifecycle                         │
-│  • Maintains runtime status and error information      │
+┌─────────────────────────────────────────────────────────┐
+│                  ArkTS Application Layer                │
+│  ┌────────────┐ ┌────────────┐ ┌──────────────────┐     │
+│  │ Status View │ │ Config Mgmt │ │ Control / Diag │     │
+│  └────────────┘ └────────────┘ └──────────────────┘     │
+├─────────────────────────────────────────────────────────┤
+│              Network Extension Layer                    │
+│  • Creates a virtual network interface                  │
+│  • Manages extension lifecycle                          │
+│  • Maintains runtime status and error information       │
 │  • Coordinates system authorization and start/stop flow │
-├─────────────────────────────────────────────────────┤
-│              NAPI Bridge (C++)                        │
-│  • startCore / stopCore / setInterfaceFd / setConfig  │
-│  • getStats / getDiagnostics                          │
+├─────────────────────────────────────────────────────────┤
+│              NAPI Bridge (C++)                          │
+│  • startCore / stopCore / setInterfaceFd / setConfig    │
+│  • getStats / getDiagnostics                            │
 │  • Bridges data between ArkTS and Native layers         │
-├─────────────────────────────────────────────────────┤
-│              Native Core (C++ / CMake)                │
-│  • fd management                                       │
-│  • Data read/write loop                                │
-│  • Basic IPv4 / TCP / UDP / DNS parsing                │
+├─────────────────────────────────────────────────────────┤
+│              Native Core (C++ / CMake)                  │
+│  • fd management                                        │
+│  • Data read/write loop                                 │
+│  • Basic IPv4 / TCP / UDP / DNS parsing                 │
 │  • Dynamic library loading and ABI adaptation           │
-├─────────────────────────────────────────────────────┤
-│         Optional Go Adapter (.so / c-shared)          │
+├─────────────────────────────────────────────────────────┤
+│         Optional Go Adapter (.so / c-shared)            │
 │  • Optional Go-based network protocol component         │
-│  • C ABI: Start / Stop / SetFd / GetStats              │
-│  • Used to validate Go ecosystem adaptation on HarmonyOS │
-└─────────────────────────────────────────────────────┘
+│  • C ABI: Start / Stop / SetFd / GetStats               │
+│  • Used to validate Go ecosystem adaptation on HarmonyOS│
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
