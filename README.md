@@ -120,7 +120,7 @@ NAPI / C++ Native dynamic loading
 ┌─────────────────────────────────────────────────────────┐
 │                  ArkTS Application Layer                │
 │  ┌────────────┐ ┌────────────┐ ┌──────────────────┐     │
-│  │ Status View │ │ Config Mgmt │ │ Control / Diag │     │
+│  │ Status View  │ │ Config Mgmt │ │ Control / Diag  │     │
 │  └────────────┘ └────────────┘ └──────────────────┘     │
 ├─────────────────────────────────────────────────────────┤
 │              Network Extension Layer                    │
