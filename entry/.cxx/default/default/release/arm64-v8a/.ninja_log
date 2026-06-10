@@ -1,0 +1,5 @@
+# ninja log v6
+0	188	1780998148076457222	CMakeFiles/vpn_core.dir/napi_init.cpp.o	2908250444b7b570
+1	337	1780998148076689725	CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o	949f277e13875167
+1	409	1780998148076802518	CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o	f381bf914fa9fccd
+410	449	1780998148485633685	/Users/chenmeijun/Documents/FlClashHarmony/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libvpn_core.so	ad1c669c0e65e75e

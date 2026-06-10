@@ -1,0 +1,20 @@
+[
+{
+  "directory": "/Users/chenmeijun/Documents/FlClashHarmony/entry/.cxx/default/default/release/arm64-v8a",
+  "command": "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm --sysroot=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/sysroot -Dvpn_core_EXPORTS -I/Applications/DevEco-Studio.app/Contents/sdk/default/hms/native/sysroot/usr/include -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O2 -DNDEBUG  -fPIC -o CMakeFiles/vpn_core.dir/napi_init.cpp.o -c /Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/napi_init.cpp",
+  "file": "/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/napi_init.cpp",
+  "output": "CMakeFiles/vpn_core.dir/napi_init.cpp.o"
+},
+{
+  "directory": "/Users/chenmeijun/Documents/FlClashHarmony/entry/.cxx/default/default/release/arm64-v8a",
+  "command": "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm --sysroot=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/sysroot -Dvpn_core_EXPORTS -I/Applications/DevEco-Studio.app/Contents/sdk/default/hms/native/sysroot/usr/include -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O2 -DNDEBUG  -fPIC -o CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o -c /Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native/mihomo_adapter.cpp",
+  "file": "/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native/mihomo_adapter.cpp",
+  "output": "CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o"
+},
+{
+  "directory": "/Users/chenmeijun/Documents/FlClashHarmony/entry/.cxx/default/default/release/arm64-v8a",
+  "command": "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/clang++ --target=aarch64-linux-ohos --gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm --sysroot=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/sysroot -Dvpn_core_EXPORTS -I/Applications/DevEco-Studio.app/Contents/sdk/default/hms/native/sysroot/usr/include -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp -I/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -fno-addrsig -Wa,--noexecstack -Wformat -Werror=format-security   -D__MUSL__ -O2 -DNDEBUG  -fPIC -o CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o -c /Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native/vpn_core.cpp",
+  "file": "/Users/chenmeijun/Documents/FlClashHarmony/entry/src/main/cpp/native/vpn_core.cpp",
+  "output": "CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o"
+}
+]

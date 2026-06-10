@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a56db"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="tunnel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#e0f2fe" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="64" y="64" width="896" height="896" rx="196" ry="196" fill="url(#bg)"/>
+
+  <!-- Outer ring -->
+  <circle cx="512" cy="460" r="260" fill="none" stroke="#ffffff" stroke-width="28" stroke-opacity="0.18"/>
+
+  <!-- Tunnel / VPN icon: two converging arcs -->
+  <!-- Left arc -->
+  <path d="M 290,580 Q 290,280 512,280 Q 590,280 640,320"
+        fill="none" stroke="url(#tunnel)" stroke-width="48" stroke-linecap="round"/>
+  <!-- Right arc -->
+  <path d="M 734,580 Q 734,280 512,280 Q 434,280 384,320"
+        fill="none" stroke="url(#tunnel)" stroke-width="48" stroke-linecap="round"/>
+
+  <!-- Network data flow dots inside tunnel -->
+  <circle cx="420" cy="380" r="14" fill="url(#glow)" opacity="0.9"/>
+  <circle cx="512" cy="330" r="16" fill="url(#glow)" opacity="1"/>
+  <circle cx="604" cy="380" r="14" fill="url(#glow)" opacity="0.9"/>
+
+  <!-- Bottom connection dots - left -->
+  <circle cx="340" cy="640" r="12" fill="#93c5fd" opacity="0.6"/>
+  <line x1="340" y1="640" x2="380" y2="580" stroke="#93c5fd" stroke-width="3" opacity="0.25" stroke-dasharray="6,6"/>
+
+  <!-- Bottom connection dots - right -->
+  <circle cx="684" cy="640" r="12" fill="#93c5fd" opacity="0.6"/>
+  <line x1="684" y1="640" x2="644" y2="580" stroke="#93c5fd" stroke-width="3" opacity="0.25" stroke-dasharray="6,6"/>
+
+  <!-- Lock/shield hint at bottom center -->
+  <path d="M 470,670 L 470,650 Q 470,635 482,628 L 512,615 L 542,628 Q 554,635 554,650 L 554,670 Z"
+        fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"/>
+</svg>

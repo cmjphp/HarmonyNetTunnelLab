@@ -1,0 +1,8 @@
+ninja: Entering directory `/Users/chenmeijun/Documents/FlClashHarmony/entry/.cxx/default/default/release/arm64-v8a'
+[1/4] Building CXX object CMakeFiles/vpn_core.dir/napi_init.cpp.o
+clang++: warning: argument unused during compilation: '--gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm' [-Wunused-command-line-argument]
+[2/4] Building CXX object CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o
+clang++: warning: argument unused during compilation: '--gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm' [-Wunused-command-line-argument]
+[3/4] Building CXX object CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o
+clang++: warning: argument unused during compilation: '--gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm' [-Wunused-command-line-argument]
+[4/4] Linking CXX shared library /Users/chenmeijun/Documents/FlClashHarmony/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libvpn_core.so
