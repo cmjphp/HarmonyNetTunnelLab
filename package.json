@@ -1,0 +1,12 @@
+{
+  "name": "harmony-vpn-mihomo-poc",
+  "version": "0.1.0",
+  "description": "HarmonyOS NEXT ArkTS VPN Extension PoC.",
+  "scripts": {
+    "mock": "node tools/mock-mihomo-server.js"
+  },
+  "devDependencies": {
+    "@ohos/hvigor": "latest",
+    "@ohos/hvigor-ohos-plugin": "latest"
+  }
+}

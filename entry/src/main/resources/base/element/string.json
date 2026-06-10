@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "HarmonyVpnMihomoPoc"
+    },
+    {
+      "name": "module_desc",
+      "value": "Harmony VPN PoC entry module"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "Harmony VPN PoC main ability"
+    },
+    {
+      "name": "internet_permission_reason",
+      "value": "用于 VPN PoC 网络能力验证"
+    }
+  ]
+}

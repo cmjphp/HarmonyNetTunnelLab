@@ -1,0 +1,25 @@
+# HarmonyOS / DevEco Studio
+local.properties
+.hvigor/outputs/
+.hvigor/cache/
+.cache/
+.preview/
+
+# Dependencies
+node_modules/
+oh_modules/
+
+# Build outputs
+build/
+entry/build/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+coverage/

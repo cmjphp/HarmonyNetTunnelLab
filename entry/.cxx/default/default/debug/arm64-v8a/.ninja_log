@@ -1,0 +1,14 @@
+# ninja log v6
+2	360	1780918851009558636	CMakeFiles/mihomo_adapter.dir/mihomo_adapter/mihomo_adapter_stub.cpp.o	89ca6c2a72397cf8
+3	9	1781094337477704467	clean	c55f32eb48221927
+413	456	1781080946461871640	/Users/chenmeijun/Documents/FlClashHarmony/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libvpn_core.so	aa618bec3be4251e
+2	223	1781093870945829404	CMakeFiles/vpn_core.dir/napi_init.cpp.o	620e925cee2e87d8
+411	456	1781093871354468810	/Users/chenmeijun/Documents/HarmonyNetTunnelLab/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libvpn_core.so	bae7a55dd8bb8395
+3	262	1780931029730909125	/Users/chenmeijun/Documents/FlClashHarmony/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libmihomo_adapter.so	d496b3b5fb453f71
+3	411	1781093870946241782	CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o	1ce0b5cd7a7641a7
+3	377	1781093870946080656	CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o	6f2b424492430427
+2	49	1781094338718023911	build.ninja	a82717725360b932
+2	244	1781094338739183559	CMakeFiles/vpn_core.dir/napi_init.cpp.o	620e925cee2e87d8
+3	394	1781094338739430186	CMakeFiles/vpn_core.dir/native/mihomo_adapter.cpp.o	6f2b424492430427
+3	426	1781094338739563062	CMakeFiles/vpn_core.dir/native/vpn_core.cpp.o	1ce0b5cd7a7641a7
+426	468	1781094339162845279	/Users/chenmeijun/Documents/HarmonyNetTunnelLab/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libvpn_core.so	bae7a55dd8bb8395
