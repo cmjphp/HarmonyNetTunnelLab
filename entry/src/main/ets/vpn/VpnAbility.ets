@@ -177,12 +177,16 @@ export default class VpnAbility extends VpnExtensionAbility {
       } else {
         // Delayed protectProcessNet: mihomo creates sockets after start, so we need to
         // re-protect after a delay to ensure DNS and proxy sockets bypass TUN.
+        // Also do multiple re-protects because mihomo may create sockets continuously
+        // for health checks, DNS resolution, etc.
         try {
-          await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-          if (this.vpnConnection) {
-            await this.vpnConnection.protectProcessNet();
-            await AppLogger.info('protectProcessNet (post-start delay 2s) success');
-            await CoreStatsStore.save(this.context, 'phase=protectProcessNetPostStartSuccess');
+          for (let delayMs of [1000, 3000, 6000, 10000]) {
+            await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+            if (this.vpnConnection) {
+              await this.vpnConnection.protectProcessNet();
+              await AppLogger.info(`protectProcessNet (post-start delay ${delayMs}ms) success`);
+              await CoreStatsStore.save(this.context, `phase=protectProcessNetPostStart_${delayMs}ms`);
+            }
           }
         } catch (protectError) {
           await AppLogger.error(`protectProcessNet (post-start delay) fail: ${AppLogger.formatError(protectError)}`);

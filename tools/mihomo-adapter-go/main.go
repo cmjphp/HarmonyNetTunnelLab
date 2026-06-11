@@ -6,12 +6,17 @@ package main
 import "C"
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,6 +30,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
+
+// unresolvedProxyDomains stores proxy server domains that failed pre-resolve
+// before mihomo started. They will be resolved post-start when protectProcessNet
+// is effective, then injected via mihomo's REST API.
+var unresolvedProxyDomains []string
 
 var (
 	stateMu    sync.Mutex
@@ -222,6 +232,460 @@ func initResolverGuard() {
 	}
 }
 
+// rawDNSResolve sends a DNS A-record query via raw UDP socket and parses the response.
+// This bypasses Go's net.Resolver which has issues on HarmonyOS with VPN TUN active.
+// Uses the same net.Dial mechanism as the connectivity test (protected by protectProcessNet).
+func rawDNSResolve(dialer *net.Dialer, domain string) string {
+	dnsServers := []string{"223.5.5.5:53", "119.29.29.29:53", "8.8.8.8:53"}
+	for _, server := range dnsServers {
+		ip := rawDNSQuery(dialer, server, domain)
+		if ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+// rawDNSQuery sends a single DNS A-record query to the specified server and returns
+// the first IPv4 address from the answer section, or "" on failure.
+func rawDNSQuery(dialer *net.Dialer, server string, domain string) string {
+	conn, err := dialer.Dial("udp", server)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	// Build DNS query packet
+	query := buildDNSQuery(domain)
+	conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Write(query); err != nil {
+		return ""
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil || n < 12 {
+		return ""
+	}
+	return parseDNSResponse(buf[:n], domain)
+}
+
+// buildDNSQuery constructs a minimal DNS A-record query for the given domain.
+func buildDNSQuery(domain string) []byte {
+	var buf []byte
+	// Transaction ID (random-ish)
+	buf = append(buf, 0xAB, 0xCD)
+	// Flags: standard query, recursion desired
+	buf = append(buf, 0x01, 0x00)
+	// Questions: 1
+	buf = append(buf, 0x00, 0x01)
+	// Answer/Authority/Additional: 0
+	buf = append(buf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+	// QNAME: encode domain as DNS labels
+	for _, label := range strings.Split(domain, ".") {
+		buf = append(buf, byte(len(label)))
+		buf = append(buf, []byte(label)...)
+	}
+	buf = append(buf, 0x00) // root label
+	// QTYPE: A (1)
+	buf = append(buf, 0x00, 0x01)
+	// QCLASS: IN (1)
+	buf = append(buf, 0x00, 0x01)
+	return buf
+}
+
+// parseDNSResponse extracts the first A-record IP from a DNS response.
+func parseDNSResponse(data []byte, domain string) string {
+	if len(data) < 12 {
+		return ""
+	}
+	// Check response code (bits 0-3 of byte 3)
+	if data[3]&0x0F != 0 {
+		return ""
+	}
+	anCount := int(data[6])<<8 | int(data[7])
+	if anCount == 0 {
+		return ""
+	}
+	// Skip question section
+	pos := 12
+	qdCount := int(data[4])<<8 | int(data[5])
+	for i := 0; i < qdCount; i++ {
+		// Skip QNAME
+		for pos < len(data) {
+			labelLen := int(data[pos])
+			if labelLen == 0 {
+				pos++
+				break
+			}
+			if labelLen&0xC0 == 0xC0 {
+				pos += 2 // compressed pointer
+				break
+			}
+			pos += 1 + labelLen
+		}
+		pos += 4 // QTYPE + QCLASS
+	}
+	// Parse answer section
+	for i := 0; i < anCount && pos < len(data); i++ {
+		// Skip NAME (may be compressed)
+		if pos >= len(data) {
+			break
+		}
+		if data[pos]&0xC0 == 0xC0 {
+			pos += 2
+		} else {
+			for pos < len(data) {
+				if data[pos] == 0 {
+					pos++
+					break
+				}
+				pos += 1 + int(data[pos])
+			}
+		}
+		if pos+10 > len(data) {
+			break
+		}
+		rType := int(data[pos])<<8 | int(data[pos+1])
+		rdLen := int(data[pos+8])<<8 | int(data[pos+9])
+		pos += 10
+		if rType == 1 && rdLen == 4 && pos+4 <= len(data) {
+			// A record: 4 bytes IPv4
+			return fmt.Sprintf("%d.%d.%d.%d", data[pos], data[pos+1], data[pos+2], data[pos+3])
+		}
+		pos += rdLen
+	}
+	return ""
+}
+
+// isNonPhysicalInterface returns true if the interface name belongs to a VPN TUN,
+// ANC virtual interface, or internal modem sub-interface that must never be used
+// as mihomo's interface-name (which uses SO_BINDTODEVICE on Linux/GOOS).
+func isNonPhysicalInterface(name string) bool {
+	// VPN / tunnel interfaces
+	for _, prefix := range []string{"vpn", "tun", "tap"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	// HarmonyOS ANC virtual interfaces (ancormnet0, anco-wlan1, etc.)
+	if strings.HasPrefix(name, "anco") || strings.HasPrefix(name, "anc") {
+		return true
+	}
+	// Internal modem sub-interfaces: rmnet_ims00, rmnet_tun00, rmnet_emc0,
+	// rmnet_mbs, rmnet_d2d, rmnet_r_ims00, etc.
+	// NOTE: the underscore is critical — "rmnet0" (no underscore) is the
+	// physical mobile-data interface and must NOT be rejected.
+	if strings.HasPrefix(name, "rmnet_") {
+		return true
+	}
+	// Loopback, P2P, dummy, IP tunnels
+	for _, prefix := range []string{"lo", "p2p", "dummy", "sit", "gre", "ip6tnl", "Hisilicon"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	// Internal bridge / container interfaces (ifb0, ifb1, hw_sate_vnet, ip_vti0, CPU0)
+	for _, prefix := range []string{"ifb", "hw_sate", "ip_vti", "ip6_vti", "CPU"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPhysicalInterfaceCandidate returns true if the interface name looks like a
+// physical network interface we want to bind mihomo's outbound sockets to.
+func isPhysicalInterfaceCandidate(name string) bool {
+	if isNonPhysicalInterface(name) {
+		return false
+	}
+	// Accept rmnetN, wlanN, ethN patterns (N is at least one digit).
+	for _, prefix := range []string{"rmnet", "wlan", "eth"} {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			c := name[len(prefix)]
+			if c >= '0' && c <= '9' {
+				return true
+			}
+		}
+	}
+	// Accept any remaining interface that is not classified as non-physical
+	// and has a non-empty name.
+	if name != "" && !isNonPhysicalInterface(name) {
+		return true
+	}
+	return false
+}
+
+// interfacePriority returns a sort-priority for physical interface candidates.
+// Lower is better.  Returns 99 for unknown interfaces.
+func interfacePriority(name string) int {
+	switch {
+	case strings.HasPrefix(name, "rmnet"):
+		return 1
+	case name == "wlan0":
+		return 2
+	case strings.HasPrefix(name, "wlan"):
+		return 3
+	case strings.HasPrefix(name, "eth"):
+		return 4
+	default:
+		return 99
+	}
+}
+
+// hasIPv4Addr reports whether the interface has at least one non-loopback IPv4 address.
+func hasIPv4Addr(iface net.Interface) bool {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() {
+			continue
+		}
+		if ip.To4() != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// detectInterfaceFromProcRoute parses /proc/net/route to find the physical
+// interface that carries the default route (Destination=00000000, Mask=00000000).
+// It excludes non-physical interfaces and picks the entry with the lowest metric.
+// Returns "" on any failure (the file is often unavailable in HarmonyOS sandboxes).
+func detectInterfaceFromProcRoute() string {
+	f, err := os.Open("/proc/net/route")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[iface-route] cannot open /proc/net/route: %v\n", err)
+		return ""
+	}
+	defer f.Close()
+
+	type routeEntry struct {
+		iface  string
+		metric int
+	}
+	var candidates []routeEntry
+
+	scanner := bufio.NewScanner(f)
+	header := true
+	for scanner.Scan() {
+		if header {
+			header = false
+			continue
+		}
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 8 {
+			continue
+		}
+		ifaceName := fields[0]
+		destHex := fields[1]
+		maskHex := fields[7]
+		metricHex := fields[6]
+
+		// Default route: Destination=00000000, Mask=00000000
+		if destHex != "00000000" || maskHex != "00000000" {
+			continue
+		}
+		if isNonPhysicalInterface(ifaceName) {
+			fmt.Fprintf(os.Stderr, "[iface-route] skip non-physical default route: %s\n", ifaceName)
+			continue
+		}
+		metric, _ := strconv.ParseUint(metricHex, 16, 32)
+		candidates = append(candidates, routeEntry{iface: ifaceName, metric: int(metric)})
+	}
+
+	if len(candidates) == 0 {
+		fmt.Fprintf(os.Stderr, "[iface-route] no physical default route found in /proc/net/route\n")
+		return ""
+	}
+
+	// Pick lowest metric.
+	best := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.metric < best.metric {
+			best = c
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[iface-route] default route via %s (metric=%d)\n", best.iface, best.metric)
+	return best.iface
+}
+
+// detectPhysicalInterfaceByProbe enumerates all network interfaces and picks the
+// best physical candidate by priority (rmnet0 > wlan0 > wlan1 > eth0 > ...).
+// Used as the last-resort fallback when UDP dial and /proc/net/route both fail.
+func detectPhysicalInterfaceByProbe() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[iface-probe] failed to list interfaces: %v\n", err)
+		return ""
+	}
+
+	type candidate struct {
+		name     string
+		priority int
+	}
+	var wlanCandidates []candidate
+	var otherCandidates []candidate
+
+	for _, iface := range ifaces {
+		if !isPhysicalInterfaceCandidate(iface.Name) {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 {
+			fmt.Fprintf(os.Stderr, "[iface-probe] skip %s: not up (flags=%v)\n", iface.Name, iface.Flags)
+			continue
+		}
+		// On HarmonyOS, wlan0 is "up|broadcast|multicast" (no running flag)
+		// when WiFi is active. rmnet0 is always "up|running" even on WiFi.
+		// So for wlan interfaces, only require FlagUp + IPv4 address as a
+		// connectivity signal. For other interfaces (rmnet, eth), still
+		// require FlagRunning to filter out dormant ones.
+		isWlan := strings.HasPrefix(iface.Name, "wlan")
+		if !isWlan && iface.Flags&net.FlagRunning == 0 {
+			fmt.Fprintf(os.Stderr, "[iface-probe] skip %s: not running (flags=%v)\n", iface.Name, iface.Flags)
+			continue
+		}
+		if !hasIPv4Addr(iface) {
+			fmt.Fprintf(os.Stderr, "[iface-probe] skip %s: no IPv4 addr\n", iface.Name)
+			continue
+		}
+		p := interfacePriority(iface.Name)
+		fmt.Fprintf(os.Stderr, "[iface-probe] candidate %s priority=%d flags=%v\n", iface.Name, p, iface.Flags)
+		c := candidate{name: iface.Name, priority: p}
+		if isWlan {
+			wlanCandidates = append(wlanCandidates, c)
+		} else {
+			otherCandidates = append(otherCandidates, c)
+		}
+	}
+
+	// When WiFi is active, wlan has an IPv4 address and should be preferred:
+	// binding to rmnet while WiFi carries traffic → "network is unreachable".
+	if len(wlanCandidates) > 0 {
+		best := wlanCandidates[0]
+		for _, c := range wlanCandidates[1:] {
+			if c.priority < best.priority {
+				best = c
+			}
+		}
+		fmt.Fprintf(os.Stderr, "[iface-probe] selected %s (wlan preferred, priority=%d)\n", best.name, best.priority)
+		return best.name
+	}
+
+	if len(otherCandidates) == 0 {
+		fmt.Fprintf(os.Stderr, "[iface-probe] no suitable physical interface found\n")
+		return ""
+	}
+
+	best := otherCandidates[0]
+	for _, c := range otherCandidates[1:] {
+		if c.priority < best.priority {
+			best = c
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[iface-probe] selected %s (priority=%d)\n", best.name, best.priority)
+	return best.name
+}
+
+// detectActiveInterface finds the physical network interface name (e.g. "rmnet0", "wlan0")
+// by dialing a public IP and checking which local interface handles the route.
+// The TUN may already be active when this is called; if the result is a non-physical
+// interface (e.g. vpn-tun), it is rejected and "" is returned.
+func detectActiveInterface() string {
+	// Dial a public IP to discover which interface the kernel uses for outbound traffic.
+	conn, err := net.DialTimeout("udp", "8.8.8.8:53", 3*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[iface-detect] failed to dial 8.8.8.8:53: %v\n", err)
+		return ""
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	localIP := localAddr.IP
+
+	// Find the interface that owns this local IP.
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[iface-detect] failed to list interfaces: %v\n", err)
+		return ""
+	}
+
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip != nil && ip.Equal(localIP) {
+				// Validate: reject VPN / ANC / non-physical interfaces.
+				if isNonPhysicalInterface(iface.Name) {
+					fmt.Fprintf(os.Stderr, "[iface-detect] REJECT: %s is not a physical interface (matched IP %s)\n", iface.Name, localIP.String())
+					return ""
+				}
+				fmt.Fprintf(os.Stderr, "[iface-detect] detected %s via %s\n", iface.Name, localIP.String())
+				return iface.Name
+			}
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "[iface-detect] no interface found for %s\n", localIP.String())
+	return ""
+}
+
+// detectActiveInterfaceWithFallback runs a three-layer detection chain to find
+// the physical network interface for mihomo's interface-name setting:
+//
+//	Layer 1: UDP dial + IP-to-interface match (existing method, with validation)
+//	Layer 2: Parse /proc/net/route for the default route
+//	Layer 3: Enumerate physical interfaces by name pattern and flags
+//
+// Returns "" if all layers fail (interface-name will not be set, which is safe).
+func detectActiveInterfaceWithFallback() string {
+	// Layer 1: UDP dial (works reliably on WiFi when protectProcessNet is effective).
+	if name := detectActiveInterface(); name != "" {
+		fmt.Fprintf(os.Stderr, "[iface-result] Layer 1 (udp dial): %s\n", name)
+		return name
+	}
+	fmt.Fprintf(os.Stderr, "[iface-result] Layer 1 failed, trying Layer 2\n")
+
+	// Layer 2: /proc/net/route (works when the kernel routing table is visible).
+	if name := detectInterfaceFromProcRoute(); name != "" {
+		fmt.Fprintf(os.Stderr, "[iface-result] Layer 2 (proc route): %s\n", name)
+		return name
+	}
+	fmt.Fprintf(os.Stderr, "[iface-result] Layer 2 failed, trying Layer 3\n")
+
+	// Layer 3: Enumerate physical interfaces (always works as long as interfaces exist).
+	if name := detectPhysicalInterfaceByProbe(); name != "" {
+		fmt.Fprintf(os.Stderr, "[iface-result] Layer 3 (probe): %s\n", name)
+		return name
+	}
+
+	fmt.Fprintf(os.Stderr, "[iface-result] WARN: all detection layers failed, interface-name will not be set\n")
+	return ""
+}
+
 func readRuntimeConfig(path string, fd int) ([]byte, string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -251,6 +715,18 @@ func readRuntimeConfig(path string, fd int) ([]byte, string, error) {
 	tun["file-descriptor"] = fd
 	if _, exists := tun["dns-hijack"]; !exists {
 		tun["dns-hijack"] = []string{"0.0.0.0:53"}
+	}
+
+	// Detect the active physical network interface and bind outbound traffic to it.
+	// protectProcessNet() only protects simple Go net.Dial sockets; mihomo's
+	// internal dialer (with SO_REUSEADDR etc.) is NOT covered, causing DNS and
+	// proxy connections to be captured by the VPN TUN default route.
+	// SO_BINDTODEVICE forces all outbound sockets to the physical NIC (rmnet0/wlan0),
+	// bypassing the VPN routing entirely.
+	detectedIface := detectActiveInterfaceWithFallback()
+	if detectedIface != "" {
+		root["interface-name"] = detectedIface
+		fmt.Fprintf(os.Stderr, "[iface-detect] interface-name=%s (protectProcessNet insufficient for mihomo internal sockets)\n", detectedIface)
 	}
 
 	dns, ok := root["dns"].(map[string]any)
@@ -293,7 +769,30 @@ func readRuntimeConfig(path string, fd int) ([]byte, string, error) {
 			}
 		}
 	}
-	if _, exists := dns["fake-ip-filter"]; !exists {
+	// Merge proxy server domains into the existing fake-ip-filter.
+	// The subscription config may already have a fake-ip-filter list — we must
+	// append any proxy domains that are not already covered by existing entries,
+	// otherwise mihomo assigns fake IPs (198.18.0.x) to proxy servers and all
+	// outbound connections fail.
+	if existingFilter, exists := dns["fake-ip-filter"]; exists {
+		if existingList, ok := existingFilter.([]any); ok {
+			// Build a set of existing entries for dedup
+			seen := make(map[string]bool, len(existingList))
+			for _, item := range existingList {
+				if s, ok := item.(string); ok {
+					seen[s] = true
+				}
+			}
+			// Append only new entries not already present
+			for _, entry := range filterList {
+				if !seen[entry] {
+					existingList = append(existingList, entry)
+					seen[entry] = true
+				}
+			}
+			dns["fake-ip-filter"] = existingList
+		}
+	} else {
 		dns["fake-ip-filter"] = filterList
 	}
 
@@ -357,6 +856,21 @@ func readRuntimeConfig(path string, fd int) ([]byte, string, error) {
 			}
 			directCancel()
 		}
+	}
+
+	// Save unresolved domains for post-start resolution.
+	// On HarmonyOS, DNS fails before mihomo starts because the VPN TUN is active
+	// but mihomo's TUN handler hasn't started reading yet, so DNS packets are stuck.
+	// After mihomo starts, Go net.Dial works (protectProcessNet is effective).
+	unresolvedProxyDomains = nil
+	for _, domain := range proxyDomains {
+		if _, resolved := resolvedHosts[domain]; !resolved {
+			unresolvedProxyDomains = append(unresolvedProxyDomains, domain)
+		}
+	}
+	if len(unresolvedProxyDomains) > 0 {
+		fmt.Fprintf(os.Stderr, "[pre-resolve] %d domains unresolved, will resolve post-start: %v\n",
+			len(unresolvedProxyDomains), unresolvedProxyDomains)
 	}
 
 	// Replace proxy server domain with resolved IP in proxy configs
@@ -469,11 +983,52 @@ func startMihomoLocked() int {
 
 	// Test outbound connectivity AFTER mihomo starts (TUN is active).
 	// This verifies protectProcessNet() is working for outbound sockets.
+	// Also resolves proxy domains that failed pre-resolve (DNS works after mihomo starts).
 	go func() {
 		time.Sleep(2 * time.Second) // Wait for TUN to be fully active
+
+		// Post-start DNS resolution: on HarmonyOS, raw net.Dial works after mihomo
+		// starts (protectProcessNet is effective), but net.Resolver's DNS client
+		// fails. Use raw UDP sockets to send DNS queries directly.
+		if len(unresolvedProxyDomains) > 0 {
+			resolved := make(map[string]string)
+			dnsDialer := net.Dialer{Timeout: 5 * time.Second}
+			for _, domain := range unresolvedProxyDomains {
+				ip := rawDNSResolve(&dnsDialer, domain)
+				if ip != "" {
+					resolved[domain] = ip
+					fmt.Fprintf(os.Stderr, "[post-resolve] %s -> %s\n", domain, ip)
+				} else {
+					fmt.Fprintf(os.Stderr, "[post-resolve] FAIL: %s\n", domain)
+				}
+			}
+
+			if len(resolved) > 0 {
+				hostsMap := make(map[string]string)
+				for domain, ip := range resolved {
+					hostsMap[domain] = ip
+				}
+				patchBody, _ := json.Marshal(map[string]any{"hosts": hostsMap})
+				req, err := http.NewRequest("PATCH", "http://127.0.0.1:9090/configs", bytes.NewReader(patchBody))
+				if err == nil {
+					req.Header.Set("Content-Type", "application/json")
+					client := &http.Client{Timeout: 3 * time.Second}
+					resp, err := client.Do(req)
+					if err == nil {
+						resp.Body.Close()
+						fmt.Fprintf(os.Stderr, "[post-resolve] patched mihomo hosts: %d entries (status %d)\n", len(resolved), resp.StatusCode)
+					} else {
+						fmt.Fprintf(os.Stderr, "[post-resolve] WARN: failed to patch mihomo: %v\n", err)
+					}
+				}
+			}
+			unresolvedProxyDomains = nil
+		}
+
 		testDialer := net.Dialer{Timeout: 5 * time.Second}
 
 		if proxyAddr != "" {
+			// Test 1: TCP to proxy
 			conn, err := testDialer.Dial("tcp", proxyAddr)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: tcp connect to proxy %s: %v\n", proxyAddr, err)
@@ -481,15 +1036,61 @@ func startMihomoLocked() int {
 				fmt.Fprintf(os.Stderr, "[connectivity-test] OK: tcp connect to proxy %s\n", proxyAddr)
 				conn.Close()
 			}
+
+			// Test 1b: UDP to proxy (hysteria2 uses QUIC/UDP)
+			udpConn, err := testDialer.Dial("udp", proxyAddr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: udp dial to proxy %s: %v\n", proxyAddr, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[connectivity-test] OK: udp dial to proxy %s\n", proxyAddr)
+				udpConn.Close()
+			}
 		}
 
-		// Test 2: connect to public DNS
+		// Test 2: TCP to public DNS
 		conn2, err := testDialer.Dial("tcp", "8.8.8.8:53")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: tcp connect to 8.8.8.8:53: %v\n", err)
 		} else {
 			fmt.Fprintf(os.Stderr, "[connectivity-test] OK: tcp connect to 8.8.8.8:53\n")
 			conn2.Close()
+		}
+
+		// Test 2b: UDP to public DNS
+		udpDns, err := testDialer.Dial("udp", "8.8.8.8:53")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: udp dial to 8.8.8.8:53: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[connectivity-test] OK: udp dial to 8.8.8.8:53\n")
+			udpDns.Close()
+		}
+
+		// Test 3: UDP round-trip (send DNS query, expect response)
+		udpSend, err := net.Dial("udp", "223.5.5.5:53")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: udp dial to 223.5.5.5:53: %v\n", err)
+		} else {
+			dnsQuery := []byte{
+				0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x03, 0x77, 0x77, 0x77,
+				0x05, 0x62, 0x61, 0x69, 0x64, 0x75, 0x03, 0x63,
+				0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
+			}
+			udpSend.SetWriteDeadline(time.Now().Add(3 * time.Second))
+			_, err := udpSend.Write(dnsQuery)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: udp write to 223.5.5.5:53: %v\n", err)
+			} else {
+				udpSend.SetReadDeadline(time.Now().Add(3 * time.Second))
+				buf := make([]byte, 512)
+				n, err := udpSend.Read(buf)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[connectivity-test] FAIL: udp read from 223.5.5.5:53: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[connectivity-test] OK: udp round-trip to 223.5.5.5:53 (recv %d bytes)\n", n)
+				}
+			}
+			udpSend.Close()
 		}
 	}()
 
